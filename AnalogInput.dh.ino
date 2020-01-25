@@ -27,11 +27,143 @@
   http://www.arduino.cc/en/Tutorial/AnalogInput
 */
 
+#include "wiring_private.h"
+
 int sensorPin = A1; // select the input pin for the potentiometer
 // int sensorPin2 = A0;
 int ledPin = 13;      // select the pin for the LED
 int sensorValue = 0;  // variable to store the value coming from the sensor
 // int sensorValue2 = 0;
+
+
+
+// Wait for synchronization of registers between the clock domains
+static __inline__ void syncADC() __attribute__((always_inline, unused));
+static void syncADC() {
+  while (ADC->STATUS.bit.SYNCBUSY == 1)
+    ;
+}
+
+ // ATSAMR, for example, doesn't have a DAC
+#ifdef DAC
+// Wait for synchronization of registers between the clock domains
+static __inline__ void syncDAC() __attribute__((always_inline, unused));
+static void syncDAC() {
+  while (DAC->STATUS.bit.SYNCBUSY == 1)
+    ;
+}
+#endif
+
+// Wait for synchronization of registers between the clock domains
+static __inline__ void syncTC_16(Tc* TCx) __attribute__((always_inline, unused));
+static void syncTC_16(Tc* TCx) {
+  while (TCx->COUNT16.STATUS.bit.SYNCBUSY);
+}
+
+// Wait for synchronization of registers between the clock domains
+static __inline__ void syncTCC(Tcc* TCCx) __attribute__((always_inline, unused));
+static void syncTCC(Tcc* TCCx) {
+  while (TCCx->SYNCBUSY.reg & TCC_SYNCBUSY_MASK);
+}
+
+uint32_t analogReadSetup(uint32_t pin)
+{
+  uint32_t valueRead = 0;
+
+#if defined(PIN_A6)
+  if (pin == 6) {
+    pin = PIN_A6;
+  } else
+#endif
+#if defined(PIN_A7)
+  if (pin == 7) {
+    pin = PIN_A7;
+  } else 
+#endif
+  if (pin <= 5) {
+    pin += A0;
+  }
+
+  pinPeripheral(pin, PIO_ANALOG);
+ //ATSAMR, for example, doesn't have a DAC
+#ifdef DAC
+
+  #if defined(__SAMD51__)
+    if (pin == A0 || pin == A1) { // Disable DAC, if analogWrite(A0,dval) used previously the DAC is enabled
+    uint8_t channel = (pin == PIN_A0 ? 0 : 1);
+    
+    if(dacEnabled[channel]){
+      dacEnabled[channel] = false;
+      
+      while (DAC->SYNCBUSY.bit.ENABLE || DAC->SYNCBUSY.bit.SWRST);
+      DAC->CTRLA.bit.ENABLE = 0;     // disable DAC
+      
+      while (DAC->SYNCBUSY.bit.ENABLE || DAC->SYNCBUSY.bit.SWRST);
+      DAC->DACCTRL[channel].bit.ENABLE = 0;
+      
+      while (DAC->SYNCBUSY.bit.ENABLE || DAC->SYNCBUSY.bit.SWRST);
+      DAC->CTRLA.bit.ENABLE = 1;     // enable DAC
+    }
+    
+    while (DAC->SYNCBUSY.bit.ENABLE);
+  #else
+    if (pin == A0) { // Disable DAC, if analogWrite(A0,dval) used previously the DAC is enabled
+      syncDAC();
+    
+    DAC->CTRLA.bit.ENABLE = 0x00; // Disable DAC
+    //DAC->CTRLB.bit.EOEN = 0x00; // The DAC output is turned off.
+    syncDAC();
+  #endif
+    }
+
+#endif
+
+  syncADC();
+  ADC->INPUTCTRL.bit.MUXPOS = g_APinDescription[pin].ulADCChannelNumber; // Selection for the positive ADC input
+  
+  // Control A
+  /*
+   * Bit 1 ENABLE: Enable
+   *   0: The ADC is disabled.
+   *   1: The ADC is enabled.
+   * Due to synchronization, there is a delay from writing CTRLA.ENABLE until the peripheral is enabled/disabled. The
+   * value written to CTRL.ENABLE will read back immediately and the Synchronization Busy bit in the Status register
+   * (STATUS.SYNCBUSY) will be set. STATUS.SYNCBUSY will be cleared when the operation is complete.
+   *
+   * Before enabling the ADC, the asynchronous clock source must be selected and enabled, and the ADC reference must be
+   * configured. The first conversion after the reference is changed must not be used.
+   */
+  syncADC();
+  ADC->CTRLA.bit.ENABLE = 0x01;             // Enable ADC
+
+  // Start conversion
+  syncADC();
+  ADC->SWTRIG.bit.START = 1;
+
+  // Clear the Data Ready flag
+  ADC->INTFLAG.reg = ADC_INTFLAG_RESRDY;
+
+  // Start conversion again, since The first conversion after the reference is changed must not be used.
+  syncADC();
+  ADC->SWTRIG.bit.START = 1;
+
+  // Store the value
+  while (ADC->INTFLAG.bit.RESRDY == 0);   // Waiting for conversion to complete
+  valueRead = ADC->RESULT.reg;
+
+  syncADC();
+  ADC->CTRLA.bit.ENABLE = 0x00;             // Disable ADC
+  syncADC();
+
+
+  return valueRead;
+}
+
+
+
+
+
+
 
 void averagingOn() {
   // Averaging (see datasheet table in AVGCTRL register description)
@@ -65,7 +197,7 @@ void setup() {
 
 void loop() {
   // read the value from the sensor:
-  sensorValue = analogRead(sensorPin); // analogRead: will replace with own code
+  sensorValue = analogReadSetup(sensorPin); // analogRead: will replace with own code
   // sensorValue2 = analogRead(sensorPin2);
   // turn the ledPin on
   /* digitalWrite(ledPin, HIGH);
