@@ -28,13 +28,70 @@
 */
 
 #include "wiring_private.h"
+#include <mcp_can.h>
+#include <SPI.h>
+
+// CAN0 RESET, INT
+#define CAN0_RST 31   // MCP25625 RESET connected to Arduino pin 31
+#define CAN0_INT 30  // Set INT to Arduino pin 30
+
+// CAN variables
+unsigned long t_prev = 0;  // Variable to store last execution time
+const unsigned int t_intvl = 10;  // Transmi interval in milliseconds
+// CAN data to send - init w/ bogus data
+byte data[] = {0xAA, 0x55, 0x01, 0x10, 0xFF, 0x12, 0x34, 0x56};
+
+
+/*
+The Manufacturer (8 bits)
+The Device Type (5 bits)
+An API ID (10 bits)
+The Device ID (6 bits)
+
+For Team created modules, FIRST says that 
+Manufacturer - HAL_CAN_Man_kTeamUse = 8
+Device Type - HAL_CAN_Dev_kMiscellaneous = 10
+API ID is up to us
+Device ID is unique to each module of a specific type (e.g., we can have more than 1 line follower)
+
+CAN ID: (Mfr ID): 0000 1000  (Device Type): 01010  (API ID): 00 0000 0000 (Device ID):00 0001 
+CAN ID: 0 0001 0000 1010   0000 0000   0000 0001 
+which is: 0x010a0001
+*/
+#define CAN_ID 0x0a080001
+
+MCP_CAN CAN0(8); // Set MCP25625 CS to Arduino pin 8
 
 int sensorPin = A1; // select the input pin for the potentiometer
 // int sensorPin2 = A0;
 int ledPin = 13;      // select the pin for the LED
 int sensorValue = 0;  // variable to store the value coming from the sensor
+int sensorValueRaw = 0;
 // int sensorValue2 = 0;
 
+// TOF sensor distance
+int tof_distance = 100; // for testing
+
+// pack message into format used by Line Follower to RoboRio
+void packMsg()
+{
+  int i;
+  long ltemp = 0;
+  int distance = 0;
+  
+  data[0] = (sensorValue >> 8) & 0x00ff;
+  data[1] = sensorValue & 0x00ff;
+  data[2] = (ltemp >> 8) & 0x00ff;
+  data[3] = ltemp & 0x00ff;
+  
+  data[4] = (distance >> 8) & 0xff;
+  data[5] = distance & 0xff;
+
+  // Then pack the TOF distance into the next 16 bits.
+  // This is a unsigned value, in units of mm
+  data[6] = (tof_distance >> 8) & 0xff;
+  data[7] = tof_distance & 0xff;
+}
 
 
 // Wait for synchronization of registers between the clock domains
@@ -159,12 +216,6 @@ uint32_t analogReadSetup(uint32_t pin)
   return valueRead;
 }
 
-
-
-
-
-
-
 void averagingOn() {
   // Averaging (see datasheet table in AVGCTRL register description)
   Serial.print("AVGCTRL.reg before change: 0x");
@@ -193,11 +244,45 @@ void setup() {
   // analogReadResolution(10);
   analogReference(AR_EXTERNAL);
   averagingOn();
+
+  digitalWrite(ledPin, 1);
+  
+    // CAN chip RESET line
+  pinMode(CAN0_RST, OUTPUT);
+  // Configuring pin for /INT input
+  pinMode(CAN0_INT, INPUT_PULLUP);
+  
+  // reset CAN chip
+  digitalWrite(CAN0_RST, 0);
+  delay(100);
+  digitalWrite(CAN0_RST, 1);
+  delay(500);  
+
+  // Initialize MCP25625 running at 16MHz with a baudrate of 1Mb/s and
+  // the masks and filters disabled.
+  if(CAN0.begin(MCP_ANY, CAN_1000KBPS, MCP_16MHZ) == CAN_OK) {
+    Serial.println("MCP25625 Initialized Successfully!");
+  } else {
+    Serial.println("Error Initializing MCP25625...");
+  }
+
+  Serial.println("Analog Input");
+  
+  CAN0.setMode(MCP_NORMAL);
+
+  delay(500);
+
+  digitalWrite(ledPin, 0);
+
 }
 
 void loop() {
   // read the value from the sensor:
-  sensorValue = analogReadSetup(sensorPin); // analogRead: will replace with own code
+  sensorValueRaw = analogReadSetup(sensorPin); // analogRead: will replace with own code
+  
+  // sensorValue is angle in deg * 10 eg. max is 3599
+  sensorValue = (int)((sensorValueRaw * 1.0) / 4096.0 * 3600.0);
+  
   // sensorValue2 = analogRead(sensorPin2);
   // turn the ledPin on
   /* digitalWrite(ledPin, HIGH);
@@ -207,10 +292,45 @@ void loop() {
   digitalWrite(ledPin, LOW);
   // stop the program for for <sensorValue> milliseconds: */ 
   delay(100); 
+  Serial.print(sensorValueRaw);
+  Serial.print('\t');
   Serial.print(sensorValue);
   Serial.print('\t');
   // Serial.print(sensorValue2);
   // Serial.print('\t');
   // Serial.print((1.0*sensorValue/sensorValue2)*360);
   Serial.println();
+
+  tof_distance++;
+
+
+    // pack message for protocol from Feather CAN Line Follower to RoboRio
+  packMsg();
+    
+  // send Extended msg
+  // byte sndStat = CAN0.sendMsgBuf(CAN_ID | 0x80000000, 1, 8, data);
+  byte sndStat = CAN0.sendMsgBuf(CAN_ID, 1, 8, data);
+  /*
+  for(i = 4; i < 6; i++) {
+    Serial.println(data[i]);
+  }
+  */
+  // byte sndStat = CAN_OK;
+    
+  /* debug printouts
+  Serial.print("TEC: ");
+  Serial.println(CAN0.errorCountTX());
+
+  Serial.print("REC: ");
+  Serial.println(CAN0.errorCountRX());
+  */
+  
+  if(sndStat == CAN_OK) {
+    Serial.println("Message Sent Successfully!");
+  } else {
+    Serial.println("Error Sending Message...");
+  }
+  
+  // Serial.println();
+
 }
