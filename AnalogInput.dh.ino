@@ -1,5 +1,5 @@
 /*
-  Analog Input
+  Analog Input (for shooter side)
 
   Demonstrates analog input by reading an analog sensor on analog pin 0 and
   turning on and off a light emitting diode(LED) connected to digital pin 13.
@@ -54,20 +54,27 @@ Device Type - HAL_CAN_Dev_kMiscellaneous = 10
 API ID is up to us
 Device ID is unique to each module of a specific type (e.g., we can have more than 1 line follower)
 
-CAN ID: (Mfr ID): 0000 1000  (Device Type): 01010  (API ID): 00 0000 0000 (Device ID):00 0001 
-CAN ID: 0 0001 0000 1010   0000 0000   0000 0001 
-which is: 0x010a0001
+CAN ID: (Device Type): 01010 (Mfr ID): 0000 1000 (API ID): 00 0000 0010 (Device ID):00 0001 
+CAN ID: 01010 0000 1000 00 0000 0010 00 0001 
+CAN ID: 0 1010 0000 1000 0000 0000 1000 0001 
+which is: 0x0A080081
+
 */
-#define CAN_ID 0x0a080001
+#define CAN_ID 0x0a080081
 
 MCP_CAN CAN0(8); // Set MCP25625 CS to Arduino pin 8
 
-int sensorPin = A1; // select the input pin for the potentiometer
-// int sensorPin2 = A0;
 int ledPin = 13;      // select the pin for the LED
-int sensorValue = 0;  // variable to store the value coming from the sensor
-int sensorValueRaw = 0;
-// int sensorValue2 = 0;
+
+int sensorPin0 = A0; // select the input pin for the potentiometer
+int sensorPin1 = A1;
+int sensorPin2 = A2;
+int sensorValue0 = 0;  // variable to store the value coming from the sensor
+int sensorValueRaw0 = 0;
+int sensorValue1 = 0;  // variable to store the value coming from the sensor
+int sensorValueRaw1 = 0;
+int sensorValue2 = 0;  // variable to store the value coming from the sensor
+int sensorValueRaw2 = 0;
 
 // TOF sensor distance
 int tof_distance = 100; // for testing
@@ -79,13 +86,13 @@ void packMsg()
   long ltemp = 0;
   int distance = 0;
   
-  data[0] = (sensorValue >> 8) & 0x00ff;
-  data[1] = sensorValue & 0x00ff;
-  data[2] = (ltemp >> 8) & 0x00ff;
-  data[3] = ltemp & 0x00ff;
+  data[0] = (sensorValue0 >> 8) & 0x00ff;
+  data[1] = sensorValue0 & 0x00ff;
+  data[2] = (sensorValue1 >> 8) & 0x00ff;
+  data[3] = sensorValue1 & 0x00ff;
   
-  data[4] = (distance >> 8) & 0xff;
-  data[5] = distance & 0xff;
+  data[4] = (sensorValue2 >> 8) & 0x00ff;
+  data[5] = sensorValue2 & 0x00ff;
 
   // Then pack the TOF distance into the next 16 bits.
   // This is a unsigned value, in units of mm
@@ -123,7 +130,8 @@ static void syncTCC(Tcc* TCCx) {
   while (TCCx->SYNCBUSY.reg & TCC_SYNCBUSY_MASK);
 }
 
-uint32_t analogReadSetup(uint32_t pin)
+
+uint32_t newAnalogRead(uint32_t pin)
 {
   uint32_t valueRead = 0;
 
@@ -145,32 +153,13 @@ uint32_t analogReadSetup(uint32_t pin)
  //ATSAMR, for example, doesn't have a DAC
 #ifdef DAC
 
-  #if defined(__SAMD51__)
-    if (pin == A0 || pin == A1) { // Disable DAC, if analogWrite(A0,dval) used previously the DAC is enabled
-    uint8_t channel = (pin == PIN_A0 ? 0 : 1);
-    
-    if(dacEnabled[channel]){
-      dacEnabled[channel] = false;
-      
-      while (DAC->SYNCBUSY.bit.ENABLE || DAC->SYNCBUSY.bit.SWRST);
-      DAC->CTRLA.bit.ENABLE = 0;     // disable DAC
-      
-      while (DAC->SYNCBUSY.bit.ENABLE || DAC->SYNCBUSY.bit.SWRST);
-      DAC->DACCTRL[channel].bit.ENABLE = 0;
-      
-      while (DAC->SYNCBUSY.bit.ENABLE || DAC->SYNCBUSY.bit.SWRST);
-      DAC->CTRLA.bit.ENABLE = 1;     // enable DAC
-    }
-    
-    while (DAC->SYNCBUSY.bit.ENABLE);
-  #else
     if (pin == A0) { // Disable DAC, if analogWrite(A0,dval) used previously the DAC is enabled
       syncDAC();
     
-    DAC->CTRLA.bit.ENABLE = 0x00; // Disable DAC
-    //DAC->CTRLB.bit.EOEN = 0x00; // The DAC output is turned off.
-    syncDAC();
-  #endif
+      DAC->CTRLA.bit.ENABLE = 0x00; // Disable DAC
+      //DAC->CTRLB.bit.EOEN = 0x00; // The DAC output is turned off.
+      syncDAC();
+
     }
 
 #endif
@@ -178,21 +167,6 @@ uint32_t analogReadSetup(uint32_t pin)
   syncADC();
   ADC->INPUTCTRL.bit.MUXPOS = g_APinDescription[pin].ulADCChannelNumber; // Selection for the positive ADC input
   
-  // Control A
-  /*
-   * Bit 1 ENABLE: Enable
-   *   0: The ADC is disabled.
-   *   1: The ADC is enabled.
-   * Due to synchronization, there is a delay from writing CTRLA.ENABLE until the peripheral is enabled/disabled. The
-   * value written to CTRL.ENABLE will read back immediately and the Synchronization Busy bit in the Status register
-   * (STATUS.SYNCBUSY) will be set. STATUS.SYNCBUSY will be cleared when the operation is complete.
-   *
-   * Before enabling the ADC, the asynchronous clock source must be selected and enabled, and the ADC reference must be
-   * configured. The first conversion after the reference is changed must not be used.
-   */
-  syncADC();
-  ADC->CTRLA.bit.ENABLE = 0x01;             // Enable ADC
-
   // Start conversion
   syncADC();
   ADC->SWTRIG.bit.START = 1;
@@ -207,11 +181,6 @@ uint32_t analogReadSetup(uint32_t pin)
   // Store the value
   while (ADC->INTFLAG.bit.RESRDY == 0);   // Waiting for conversion to complete
   valueRead = ADC->RESULT.reg;
-
-  syncADC();
-  ADC->CTRLA.bit.ENABLE = 0x00;             // Disable ADC
-  syncADC();
-
 
   return valueRead;
 }
@@ -238,12 +207,49 @@ void averagingOn() {
   while( ADC->STATUS.bit.SYNCBUSY == 1 );          // Wait for synchronization of registers between the clock domains
 }
 
+void enableAnalog() {
+  // set clock slower due to source resistance
+  while( ADC->STATUS.bit.SYNCBUSY == 1 );          // Wait for synchronization of registers between the clock domains
+
+  Serial.print("CTRLB.reg before change: 0x");
+  Serial.println(ADC->CTRLB.reg, HEX);
+  ADC->CTRLB.bit.PRESCALER = ADC_CTRLB_PRESCALER_DIV64_Val;         // set clock PRESCALER to 64 (default is 32)
+  
+  Serial.print("CTRLB.reg after change to PRESCALER / 64: 0x");
+  Serial.println(ADC->CTRLB.reg, HEX);
+
+  while( ADC->STATUS.bit.SYNCBUSY == 1 );          // Wait for synchronization of registers between the clock domains
+
+  
+  // Control A
+  /*
+   * Bit 1 ENABLE: Enable
+   *   0: The ADC is disabled.
+   *   1: The ADC is enabled.
+   * Due to synchronization, there is a delay from writing CTRLA.ENABLE until the peripheral is enabled/disabled. The
+   * value written to CTRL.ENABLE will read back immediately and the Synchronization Busy bit in the Status register
+   * (STATUS.SYNCBUSY) will be set. STATUS.SYNCBUSY will be cleared when the operation is complete.
+   *
+   * Before enabling the ADC, the asynchronous clock source must be selected and enabled, and the ADC reference must be
+   * configured. The first conversion after the reference is changed must not be used.
+   */
+  syncADC();
+  ADC->CTRLA.bit.ENABLE = 0x01;             // Enable ADC
+
+}
+
 void setup() {
+  // wait for serial port connection
+  while(!Serial);
+  
   // declare the ledPin as an OUTPUT:
   pinMode(ledPin, OUTPUT);
   // analogReadResolution(10);
   analogReference(AR_EXTERNAL);
+  enableAnalog();
   averagingOn();
+
+  delay(5000);
 
   digitalWrite(ledPin, 1);
   
@@ -277,13 +283,25 @@ void setup() {
 }
 
 void loop() {
+  
   // read the value from the sensor:
-  sensorValueRaw = analogReadSetup(sensorPin); // analogRead: will replace with own code
+  sensorValueRaw0 = newAnalogRead(sensorPin0); // used to be analogRead(), made new function
   
   // sensorValue is angle in deg * 10 eg. max is 3599
-  sensorValue = (int)((sensorValueRaw * 1.0) / 4096.0 * 3600.0);
+  sensorValue0 = (int)((sensorValueRaw0 * 1.0) / 4096.0 * 3600.0);
   
-  // sensorValue2 = analogRead(sensorPin2);
+    // read the value from the sensor:
+  sensorValueRaw1 = newAnalogRead(sensorPin1); // used to be analogRead(), made new function
+  
+  // sensorValue is angle in deg * 10 eg. max is 3599
+  sensorValue1 = (int)((sensorValueRaw1 * 1.0) / 4096.0 * 3600.0);
+
+    // read the value from the sensor:
+  sensorValueRaw2 = newAnalogRead(sensorPin2); // used to be analogRead(), made new function
+  
+  // sensorValue is angle in deg * 10 eg. max is 3599
+  sensorValue2 = (int)((sensorValueRaw2 * 1.0) / 4096.0 * 3600.0);
+  
   // turn the ledPin on
   /* digitalWrite(ledPin, HIGH);
   // stop the program for <sensorValue> milliseconds:
@@ -291,10 +309,18 @@ void loop() {
   // turn the ledPin off:
   digitalWrite(ledPin, LOW);
   // stop the program for for <sensorValue> milliseconds: */ 
-  delay(100); 
-  Serial.print(sensorValueRaw);
+  // delay(100); 
+  Serial.print(sensorValueRaw0);
   Serial.print('\t');
-  Serial.print(sensorValue);
+  Serial.print(sensorValue0);
+  Serial.print('\t');
+  Serial.print(sensorValueRaw1);
+  Serial.print('\t');
+  Serial.print(sensorValue1);
+  Serial.print('\t');
+  Serial.print(sensorValueRaw2);
+  Serial.print('\t');
+  Serial.print(sensorValue2);
   Serial.print('\t');
   // Serial.print(sensorValue2);
   // Serial.print('\t');
@@ -305,17 +331,17 @@ void loop() {
 
 
     // pack message for protocol from Feather CAN Line Follower to RoboRio
-  packMsg();
+  // packMsg();
     
   // send Extended msg
   // byte sndStat = CAN0.sendMsgBuf(CAN_ID | 0x80000000, 1, 8, data);
-  byte sndStat = CAN0.sendMsgBuf(CAN_ID, 1, 8, data);
+  // byte sndStat = CAN0.sendMsgBuf(CAN_ID, 1, 8, data);
   /*
   for(i = 4; i < 6; i++) {
     Serial.println(data[i]);
   }
   */
-  // byte sndStat = CAN_OK;
+  byte sndStat = CAN_OK;
     
   /* debug printouts
   Serial.print("TEC: ");
@@ -325,11 +351,13 @@ void loop() {
   Serial.println(CAN0.errorCountRX());
   */
   
+  /*
   if(sndStat == CAN_OK) {
     Serial.println("Message Sent Successfully!");
   } else {
     Serial.println("Error Sending Message...");
   }
+  */
   
   // Serial.println();
 
