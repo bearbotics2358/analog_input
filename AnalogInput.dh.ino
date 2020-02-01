@@ -30,10 +30,14 @@
 #include "wiring_private.h"
 #include <mcp_can.h>
 #include <SPI.h>
+#include "Adafruit_VL53L0X.h"
 
 // CAN0 RESET, INT
 #define CAN0_RST 31   // MCP25625 RESET connected to Arduino pin 31
 #define CAN0_INT 30  // Set INT to Arduino pin 30
+
+// Time of flight sensor out of range value
+#define OUT_OF_RANGE -100
 
 // CAN variables
 unsigned long t_prev = 0;  // Variable to store last execution time
@@ -62,6 +66,9 @@ which is: 0x0A080081
 */
 #define CAN_ID 0x0a080081
 
+// 1 if has time of flights, 0 if not
+char tof_mode = 0;
+
 MCP_CAN CAN0(8); // Set MCP25625 CS to Arduino pin 8
 
 int ledPin = 13;      // select the pin for the LED
@@ -77,10 +84,14 @@ int sensorValue2 = 0;  // variable to store the value coming from the sensor
 int sensorValueRaw2 = 0;
 
 // TOF sensor distance
-int tof_distance = 100; // for testing
+int tof_distance_0 = 0; // for testing
+int tof_distance_1 = 1; // for testing
 
-// pack message into format used by Line Follower to RoboRio
-void packMsg()
+//Time of Flight Stuff
+Adafruit_VL53L0X lox = Adafruit_VL53L0X();
+
+// pack message into format used by 2 steering and 1 shooter to RoboRio
+void packMsgShooter()
 {
   int i;
   long ltemp = 0;
@@ -88,16 +99,37 @@ void packMsg()
   
   data[0] = (sensorValue0 >> 8) & 0x00ff;
   data[1] = sensorValue0 & 0x00ff;
+
   data[2] = (sensorValue1 >> 8) & 0x00ff;
   data[3] = sensorValue1 & 0x00ff;
   
   data[4] = (sensorValue2 >> 8) & 0x00ff;
   data[5] = sensorValue2 & 0x00ff;
 
+  data[6] = 0x00;
+  data[7] = 0x00;
+}
+
+// pack message into format used by 2 steering and 2 time of flight to RoboRio
+void packMsgTOF()
+{
+  int i;
+  long ltemp = 0;
+  int distance = 0;
+  
+  data[0] = (sensorValue0 >> 8) & 0x00ff;
+  data[1] = sensorValue0 & 0x00ff;
+  
+  data[2] = (sensorValue1 >> 8) & 0x00ff;
+  data[3] = sensorValue1 & 0x00ff;
+  
+  data[4] = (tof_distance_0 >> 8) & 0x00ff;
+  data[5] = tof_distance_0 & 0x00ff;
+
   // Then pack the TOF distance into the next 16 bits.
   // This is a unsigned value, in units of mm
-  data[6] = (tof_distance >> 8) & 0xff;
-  data[7] = tof_distance & 0xff;
+  data[6] = (tof_distance_1 >> 8) & 0xff;
+  data[7] = tof_distance_1 & 0xff;
 }
 
 
@@ -239,9 +271,14 @@ void enableAnalog() {
 }
 
 void setup() {
+
+  Serial.begin(115200);
+
+  File file = fatfs.open (, FILE_READ);
+
   // wait for serial port connection
   while(!Serial);
-  
+
   // declare the ledPin as an OUTPUT:
   pinMode(ledPin, OUTPUT);
   // analogReadResolution(10);
@@ -280,6 +317,23 @@ void setup() {
 
   digitalWrite(ledPin, 0);
 
+
+
+
+
+
+
+
+
+
+  //Time of Flight Stuff 
+  Serial.println("Adafruit VL53L0X test");
+  if (!lox.begin()) {
+    Serial.println(F("Failed to boot VL53L0X"));
+    while(1);
+  }
+  // power 
+  Serial.println(F("VL53L0X API Simple Ranging example\n\n")); 
 }
 
 void loop() {
@@ -309,7 +363,8 @@ void loop() {
   // turn the ledPin off:
   digitalWrite(ledPin, LOW);
   // stop the program for for <sensorValue> milliseconds: */ 
-  // delay(100); 
+  // delay(100);
+  Serial.print("Encoder Values:\t"); 
   Serial.print(sensorValueRaw0);
   Serial.print('\t');
   Serial.print(sensorValue0);
@@ -327,21 +382,43 @@ void loop() {
   // Serial.print((1.0*sensorValue/sensorValue2)*360);
   Serial.println();
 
-  tof_distance++;
 
+  // Time of Flight Stuff
+  VL53L0X_RangingMeasurementData_t measure;
+    
+  Serial.print("Reading a measurement... ");
+  lox.rangingTest(&measure, false); // pass in 'true' to get debug data printout!
 
-    // pack message for protocol from Feather CAN Line Follower to RoboRio
-  // packMsg();
+  if (measure.RangeStatus != 4) {  // phase failures have incorrect data
+    tof_distance_0 = measure.RangeMilliMeter;
+    Serial.print("Distance (mm): ");
+    Serial.println(measure.RangeMilliMeter);
+  } else {
+    tof_distance_0 = OUT_OF_RANGE;
+    Serial.println(" out of range ");
+  }
+
+  // pack message for protocol from Feather CAN Line Follower to RoboRio
+  if (tof_mode)
+  {
+    packMsgTOF();
+  }
+  else
+  {
+    packMsgShoot();
+  }
     
   // send Extended msg
   // byte sndStat = CAN0.sendMsgBuf(CAN_ID | 0x80000000, 1, 8, data);
-  // byte sndStat = CAN0.sendMsgBuf(CAN_ID, 1, 8, data);
+  byte sndStat = CAN0.sendMsgBuf(CAN_ID, 1, 8, data);
+
   /*
   for(i = 4; i < 6; i++) {
     Serial.println(data[i]);
   }
   */
-  byte sndStat = CAN_OK;
+  
+  // byte sndStat = CAN_OK;
     
   /* debug printouts
   Serial.print("TEC: ");
@@ -351,14 +428,13 @@ void loop() {
   Serial.println(CAN0.errorCountRX());
   */
   
-  /*
   if(sndStat == CAN_OK) {
     Serial.println("Message Sent Successfully!");
   } else {
     Serial.println("Error Sending Message...");
   }
-  */
   
   // Serial.println();
-
+    
+  delay(100);
 }
