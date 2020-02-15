@@ -31,6 +31,7 @@
 #include <mcp_can.h>
 #include <SPI.h>
 #include "Adafruit_VL53L0X.h"
+#include <Adafruit_DotStar.h>
 
 // CAN0 RESET, INT
 #define CAN0_RST 31   // MCP25625 RESET connected to Arduino pin 31
@@ -38,6 +39,13 @@
 
 // Time of flight sensor out of range value
 #define OUT_OF_RANGE -100
+
+#define NUMPIXELS 4 // Number of LEDs in strip
+
+// Here's how to control the LEDs from any two pins:
+#define DATAPIN    11
+#define CLOCKPIN   13
+Adafruit_DotStar strip(NUMPIXELS, DATAPIN, CLOCKPIN, DOTSTAR_BRG);
 
 // CAN variables
 unsigned long t_prev = 0;  // Variable to store last execution time
@@ -272,9 +280,11 @@ void enableAnalog() {
 
 void setup() {
 
+  int i;
+
   Serial.begin(115200);
 
-  File file = fatfs.open (, FILE_READ);
+//  File file = fatfs.open (, FILE_READ);
 
   // wait for serial port connection
   while(!Serial);
@@ -334,6 +344,14 @@ void setup() {
   }
   // power 
   Serial.println(F("VL53L0X API Simple Ranging example\n\n")); 
+
+
+  strip.begin();
+ 
+  for(i = 0; i < NUMPIXELS; i++) {
+    strip.setPixelColor(i, 0x000050);      
+  }
+  strip.show();                     // Refresh strip
 }
 
 void loop() {
@@ -342,7 +360,8 @@ void loop() {
   sensorValueRaw0 = newAnalogRead(sensorPin0); // used to be analogRead(), made new function
   
   // sensorValue is angle in deg * 10 eg. max is 3599
-  sensorValue0 = (int)((sensorValueRaw0 * 1.0) / 4096.0 * 3600.0);
+  // sensorValue0 = (int)((sensorValueRaw0 * 1.0) / 4096.0 * 3600.0);
+  sensorValue0 = map(sensorValueRaw0, 9, 4061, 0, 3599);
   
     // read the value from the sensor:
   sensorValueRaw1 = newAnalogRead(sensorPin1); // used to be analogRead(), made new function
@@ -355,6 +374,15 @@ void loop() {
   
   // sensorValue is angle in deg * 10 eg. max is 3599
   sensorValue2 = (int)((sensorValueRaw2 * 1.0) / 4096.0 * 3600.0);
+
+  if((sensorValue0 < 30) || (sensorValue0 > 3570)) {
+    strip.setPixelColor(0, 0x005000); 
+  } else if((sensorValue0 > 30) && (sensorValue0 <= 1800)) { // needs to go clockwise
+    strip.setPixelColor(0, 0x500000);
+  } else if((sensorValue0 > 1800) && (sensorValue0 < 3570)) { // needs to go counterclockwise
+    strip.setPixelColor(0, 0x500050);  
+  }
+  strip.show();
   
   // turn the ledPin on
   /* digitalWrite(ledPin, HIGH);
@@ -367,7 +395,7 @@ void loop() {
   Serial.print("Encoder Values:\t"); 
   Serial.print(sensorValueRaw0);
   Serial.print('\t');
-  Serial.print(sensorValue0);
+  Serial.print(sensorValue0 / 10.0);
   Serial.print('\t');
   Serial.print(sensorValueRaw1);
   Serial.print('\t');
@@ -385,7 +413,7 @@ void loop() {
 
   // Time of Flight Stuff
   VL53L0X_RangingMeasurementData_t measure;
-    
+  /*  
   Serial.print("Reading a measurement... ");
   lox.rangingTest(&measure, false); // pass in 'true' to get debug data printout!
 
@@ -397,7 +425,7 @@ void loop() {
     tof_distance_0 = OUT_OF_RANGE;
     Serial.println(" out of range ");
   }
-
+*/
   // pack message for protocol from Feather CAN Line Follower to RoboRio
   if (tof_mode)
   {
@@ -405,12 +433,12 @@ void loop() {
   }
   else
   {
-    packMsgShoot();
+    packMsgShooter();
   }
     
   // send Extended msg
   // byte sndStat = CAN0.sendMsgBuf(CAN_ID | 0x80000000, 1, 8, data);
-  byte sndStat = CAN0.sendMsgBuf(CAN_ID, 1, 8, data);
+  // byte sndStat = CAN0.sendMsgBuf(CAN_ID, 1, 8, data);
 
   /*
   for(i = 4; i < 6; i++) {
@@ -418,7 +446,7 @@ void loop() {
   }
   */
   
-  // byte sndStat = CAN_OK;
+  byte sndStat = CAN_OK;
     
   /* debug printouts
   Serial.print("TEC: ");
@@ -427,13 +455,13 @@ void loop() {
   Serial.print("REC: ");
   Serial.println(CAN0.errorCountRX());
   */
-  
+  /*
   if(sndStat == CAN_OK) {
     Serial.println("Message Sent Successfully!");
   } else {
     Serial.println("Error Sending Message...");
   }
-  
+  */
   // Serial.println();
     
   delay(100);
