@@ -244,22 +244,22 @@ uint32_t newAnalogRead(uint32_t pin)
 
 void averagingOn() {
   // Averaging (see datasheet table in AVGCTRL register description)
-  Serial.print("AVGCTRL.reg before change: 0x");
-  Serial.println(ADC->AVGCTRL.reg, HEX);
+  // Serial.print("AVGCTRL.reg before change: 0x");
+  // Serial.println(ADC->AVGCTRL.reg, HEX);
   ADC->AVGCTRL.reg = ADC_AVGCTRL_SAMPLENUM_16 |    // 16 sample averaging)
                      ADC_AVGCTRL_ADJRES(0x4ul);   // Adjusting result (right shift) by 4
 
-  Serial.print("AVGCTRL.reg after averaging turned on: 0x");
-  Serial.println(ADC->AVGCTRL.reg, HEX);
+  // Serial.print("AVGCTRL.reg after averaging turned on: 0x");
+  // Serial.println(ADC->AVGCTRL.reg, HEX);
 
   while( ADC->STATUS.bit.SYNCBUSY == 1 );          // Wait for synchronization of registers between the clock domains
 
-  Serial.print("CTRLB.reg before change: 0x");
-  Serial.println(ADC->CTRLB.reg, HEX);
+  // Serial.print("CTRLB.reg before change: 0x");
+  // Serial.println(ADC->CTRLB.reg, HEX);
   ADC->CTRLB.bit.RESSEL = ADC_CTRLB_RESSEL_16BIT_Val;         // 16 bits resolution for averaging
   
-  Serial.print("CTRLB.reg after change to 16 bit result: 0x");
-  Serial.println(ADC->CTRLB.reg, HEX);
+  // Serial.print("CTRLB.reg after change to 16 bit result: 0x");
+  // Serial.println(ADC->CTRLB.reg, HEX);
 
   while( ADC->STATUS.bit.SYNCBUSY == 1 );          // Wait for synchronization of registers between the clock domains
 }
@@ -268,12 +268,12 @@ void enableAnalog() {
   // set clock slower due to source resistance
   while( ADC->STATUS.bit.SYNCBUSY == 1 );          // Wait for synchronization of registers between the clock domains
 
-  Serial.print("CTRLB.reg before change: 0x");
-  Serial.println(ADC->CTRLB.reg, HEX);
+  // Serial.print("CTRLB.reg before change: 0x");
+  // Serial.println(ADC->CTRLB.reg, HEX);
   ADC->CTRLB.bit.PRESCALER = ADC_CTRLB_PRESCALER_DIV64_Val;         // set clock PRESCALER to 64 (default is 32)
   
-  Serial.print("CTRLB.reg after change to PRESCALER / 64: 0x");
-  Serial.println(ADC->CTRLB.reg, HEX);
+  // Serial.print("CTRLB.reg after change to PRESCALER / 64: 0x");
+  // Serial.println(ADC->CTRLB.reg, HEX);
 
   while( ADC->STATUS.bit.SYNCBUSY == 1 );          // Wait for synchronization of registers between the clock domains
 
@@ -329,18 +329,18 @@ void read_samd21_serial_no(struct serialNum *number)
 }
 
 void printSerialNum(struct serialNum number) {
-  Serial.print("number(0): 0x"); Serial.println(number.sN[0], HEX);
-  Serial.print("number(1): 0x"); Serial.println(number.sN[1], HEX);
-  Serial.print("number(2): 0x"); Serial.println(number.sN[2], HEX);
-  Serial.print("number(3): 0x"); Serial.println(number.sN[3], HEX);
+  // Serial.print("number(0): 0x"); Serial.println(number.sN[0], HEX);
+  // Serial.print("number(1): 0x"); Serial.println(number.sN[1], HEX);
+  // Serial.print("number(2): 0x"); Serial.println(number.sN[2], HEX);
+  // Serial.print("number(3): 0x"); Serial.println(number.sN[3], HEX);
 }
 
 int checkSerialNum(struct serialNum a, struct serialNum b) {
   int ret = 0;
 
-  Serial.println("a: ");
+  // Serial.println("a: ");
   printSerialNum(a);
-  Serial.println("b: ");
+  // Serial.println("b: ");
   printSerialNum(b);
 
   if((a.sN[0] == b.sN[0]) && 
@@ -349,7 +349,7 @@ int checkSerialNum(struct serialNum a, struct serialNum b) {
      (a.sN[3] == b.sN[3])) {
     ret = 1;
   }
-  Serial.println(ret);
+  // Serial.println(ret);
   return ret;
 }
 
@@ -371,7 +371,7 @@ void setup() {
   enableAnalog();
   averagingOn();
 
-  delay(5000);
+  delay(1000);
 
   digitalWrite(ledPin, 1);
   
@@ -398,9 +398,9 @@ void setup() {
   
   CAN0.setMode(MCP_NORMAL);
 
-  delay(500);
+  // delay(500);
 
-  digitalWrite(ledPin, 0);
+  digitalWrite(ledPin, 1);
 
   struct serialNum serialNumber;
 
@@ -415,6 +415,7 @@ void setup() {
 
   if(conf[board].type == TIMEOFFLIGHT) {
   //Time of Flight Stuff 
+    Serial.print("TIME OF FLIGHT MODE:");
     Serial.println("Adafruit VL53L0X test");
     pinMode(TOF_SHUTDOWN, OUTPUT);
     digitalWrite(TOF_SHUTDOWN, 0); // disables 2nd sensor
@@ -446,7 +447,12 @@ void setup() {
 }
 
 void loop() {
-  
+
+  if(millis() < t_prev + t_intvl) {
+    return;
+  }
+  t_prev = millis();
+  do {
   // read the value from the sensor:
   sensorValueRaw0 = newAnalogRead(sensorPin0); // used to be analogRead(), made new function
   
@@ -471,7 +477,7 @@ void loop() {
     setColor(2, sensorValue2);
   }
   strip.show();
-  
+  /*
   Serial.println();
   Serial.print("Encoder Values:\t"); 
   Serial.print(sensorValueRaw0);
@@ -488,33 +494,33 @@ void loop() {
     Serial.print(sensorValue2 / 10.0);
   }
   Serial.println();
-
+*/
   if(conf[board].type == TIMEOFFLIGHT) {
     // Time of Flight Stuff
     VL53L0X_RangingMeasurementData_t measure;
     
-    Serial.print("Reading a measurement (sensor 0)... ");
+    // Serial.print("Reading a measurement (sensor 0)... ");
     lox0.rangingTest(&measure, false); // pass in 'true' to get debug data printout!
 
     if (measure.RangeStatus != 4) {  // phase failures have incorrect data
       tofDistance[0] = measure.RangeMilliMeter;
-      Serial.print("Distance (mm): ");
-      Serial.println(measure.RangeMilliMeter);
+      // Serial.print("Distance (mm): ");
+      // Serial.println(measure.RangeMilliMeter);
     } else {
       tofDistance[0] = OUT_OF_RANGE;
-      Serial.println(" out of range ");
+      // Serial.println(" out of range ");
     }
 
-    Serial.print("Reading a measurement (sensor 1)... ");
+    // Serial.print("Reading a measurement (sensor 1)... ");
     lox1.rangingTest(&measure, false); // pass in 'true' to get debug data printout!
 
     if (measure.RangeStatus != 4) {  // phase failures have incorrect data
       tofDistance[1] = measure.RangeMilliMeter;
-      Serial.print("Distance (mm): ");
-      Serial.println(measure.RangeMilliMeter);
+      // Serial.print("Distance (mm): ");
+      // Serial.println(measure.RangeMilliMeter);
     } else {
       tofDistance[1] = OUT_OF_RANGE;
-      Serial.println(" out of range ");
+      // Serial.println(" out of range ");
     }
   }
   // pack message for protocol from Feather CAN Line Follower to RoboRio
@@ -527,7 +533,7 @@ void loop() {
     
   // send Extended msg
   // byte sndStat = CAN0.sendMsgBuf(conf[board].canId | 0x80000000, 1, 8, data);
-  // byte sndStat = CAN0.sendMsgBuf(conf[board].canId, 1, 8, data); // ITS THIS ONE!! :)
+  byte sndStat = CAN0.sendMsgBuf(conf[board].canId, 1, 8, data); // ITS THIS ONE!! :)
 
   /*
   for(i = 4; i < 6; i++) {
@@ -535,7 +541,7 @@ void loop() {
   }
   */
   
-  byte sndStat = CAN_OK;
+  // byte sndStat = CAN_OK;
     
   /* debug printouts
   Serial.print("TEC: ");
@@ -553,5 +559,6 @@ void loop() {
   */
   // Serial.println();
     
-  delay(1000);
+  // delay(1000);
+  }
 }
