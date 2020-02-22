@@ -1,3 +1,4 @@
+
 /*
   Analog Input (for shooter side)
 
@@ -32,6 +33,7 @@
 #include <SPI.h>
 #include "Adafruit_VL53L0X.h"
 #include <Adafruit_DotStar.h>
+#include "initialization.h"
 
 // CAN0 RESET, INT
 #define CAN0_RST 31   // MCP25625 RESET connected to Arduino pin 31
@@ -46,6 +48,9 @@
 #define DATAPIN    11
 #define CLOCKPIN   13
 Adafruit_DotStar strip(NUMPIXELS, DATAPIN, CLOCKPIN, DOTSTAR_BRG);
+
+#define TOF_SHUTDOWN 12 // shutdown pin for 2nd tof sensor
+#define TOF_ADDRESS 0x2A // default is 0x29 for 7-bits, 0x52 & 0x53 for 8-bits
 
 // CAN variables
 unsigned long t_prev = 0;  // Variable to store last execution time
@@ -64,39 +69,51 @@ For Team created modules, FIRST says that
 Manufacturer - HAL_CAN_Man_kTeamUse = 8
 Device Type - HAL_CAN_Dev_kMiscellaneous = 10
 API ID is up to us
-Device ID is unique to each module of a specific type (e.g., we can have more than 1 line follower)
+Device ID is unique to each module of a specific type (e.g., we can have more than 1 *not* line follower)
 
+
+CAN ID: (Device Type): TTTTT (Mfr ID): MMMM MMMM (API ID): AA AAAA AAAA (Device ID): DD DDDD 
+CAN ID: TTTTT MMMM MMMM AA AAAA AAAA DD DDDD 
+CAN ID: T TTTT MMMM MMMM AAAA AAAA AADD DDDD 
+CAN ID: 0 1010 0000 1000 AAAA AAAA AADD DDDD 
+
+shooter: 2, tof: 3
+
+shooter:
 CAN ID: (Device Type): 01010 (Mfr ID): 0000 1000 (API ID): 00 0000 0010 (Device ID):00 0001 
 CAN ID: 01010 0000 1000 00 0000 0010 00 0001 
 CAN ID: 0 1010 0000 1000 0000 0000 1000 0001 
 which is: 0x0A080081
 
+tof:
+CAN ID: 0 1010 0000 1000 0000 0000 1100 0001
+which is: 0x0A0800C1 
+
 */
 #define CAN_ID 0x0a080081
-
-// 1 if has time of flights, 0 if not
-char tof_mode = 0;
 
 MCP_CAN CAN0(8); // Set MCP25625 CS to Arduino pin 8
 
 int ledPin = 13;      // select the pin for the LED
+
+int board = -1; // will be used to determine which board we are using
 
 int sensorPin0 = A0; // select the input pin for the potentiometer
 int sensorPin1 = A1;
 int sensorPin2 = A2;
 int sensorValue0 = 0;  // variable to store the value coming from the sensor
 int sensorValueRaw0 = 0;
-int sensorValue1 = 0;  // variable to store the value coming from the sensor
+int sensorValue1 = 0;  
 int sensorValueRaw1 = 0;
-int sensorValue2 = 0;  // variable to store the value coming from the sensor
+int sensorValue2 = 0;  
 int sensorValueRaw2 = 0;
 
 // TOF sensor distance
-int tof_distance_0 = 0; // for testing
-int tof_distance_1 = 1; // for testing
+int tofDistance[2] = {0, 0};
 
 //Time of Flight Stuff
-Adafruit_VL53L0X lox = Adafruit_VL53L0X();
+Adafruit_VL53L0X lox0 = Adafruit_VL53L0X();
+Adafruit_VL53L0X lox1 = Adafruit_VL53L0X();
 
 // pack message into format used by 2 steering and 1 shooter to RoboRio
 void packMsgShooter()
@@ -131,13 +148,13 @@ void packMsgTOF()
   data[2] = (sensorValue1 >> 8) & 0x00ff;
   data[3] = sensorValue1 & 0x00ff;
   
-  data[4] = (tof_distance_0 >> 8) & 0x00ff;
-  data[5] = tof_distance_0 & 0x00ff;
+  data[4] = (tofDistance[0] >> 8) & 0x00ff;
+  data[5] = tofDistance[0] & 0x00ff;
 
   // Then pack the TOF distance into the next 16 bits.
   // This is a unsigned value, in units of mm
-  data[6] = (tof_distance_1 >> 8) & 0xff;
-  data[7] = tof_distance_1 & 0xff;
+  data[6] = (tofDistance[1] >> 8) & 0xff;
+  data[7] = tofDistance[1] & 0xff;
 }
 
 
@@ -197,7 +214,7 @@ uint32_t newAnalogRead(uint32_t pin)
       syncDAC();
     
       DAC->CTRLA.bit.ENABLE = 0x00; // Disable DAC
-      //DAC->CTRLB.bit.EOEN = 0x00; // The DAC output is turned off.
+      // DAC->CTRLB.bit.EOEN = 0x00; // The DAC output is turned off.
       syncDAC();
 
     }
@@ -278,6 +295,64 @@ void enableAnalog() {
 
 }
 
+void setColor(int index, int sensorVal) {
+  if((sensorVal < 30) || (sensorVal > 3570)) { // 0xGGRRBB (color values)
+    // Serial.print("green; we gucci fam");
+    strip.setPixelColor(index, 0x500000); 
+  } else if((sensorVal > 30) && (sensorVal <= 1800)) { 
+    // Serial.print("red; too far");
+    strip.setPixelColor(index, 0x005000);
+  } else if((sensorVal > 1800) && (sensorVal < 3570)) {
+    // Serial.print("purple; too far");
+    strip.setPixelColor(index, 0x005050);  
+  } else {
+    // Serial.print("white; there's an error");
+    strip.setPixelColor(index, 0x505050);
+  }
+}
+
+void read_samd21_serial_no(struct serialNum *number)
+{
+  uint32_t *p;
+
+  p = (uint32_t *)0x0080a00c;
+  number->sN[0] = *p;
+
+  p = (uint32_t *)0x0080a040;
+  number->sN[1] = *p;
+
+  p = (uint32_t *)0x0080a044;
+  number->sN[2] = *p;
+
+  p = (uint32_t *)0x0080a048;
+  number->sN[3] = *p;
+}
+
+void printSerialNum(struct serialNum number) {
+  Serial.print("number(0): 0x"); Serial.println(number.sN[0], HEX);
+  Serial.print("number(1): 0x"); Serial.println(number.sN[1], HEX);
+  Serial.print("number(2): 0x"); Serial.println(number.sN[2], HEX);
+  Serial.print("number(3): 0x"); Serial.println(number.sN[3], HEX);
+}
+
+int checkSerialNum(struct serialNum a, struct serialNum b) {
+  int ret = 0;
+
+  Serial.println("a: ");
+  printSerialNum(a);
+  Serial.println("b: ");
+  printSerialNum(b);
+
+  if((a.sN[0] == b.sN[0]) && 
+     (a.sN[1] == b.sN[1]) &&
+     (a.sN[2] == b.sN[2]) &&
+     (a.sN[3] == b.sN[3])) {
+    ret = 1;
+  }
+  Serial.println(ret);
+  return ret;
+}
+
 void setup() {
 
   int i;
@@ -327,31 +402,47 @@ void setup() {
 
   digitalWrite(ledPin, 0);
 
+  struct serialNum serialNumber;
 
-
-
-
-
-
-
-
-
-  //Time of Flight Stuff 
-  Serial.println("Adafruit VL53L0X test");
-  if (!lox.begin()) {
-    Serial.println(F("Failed to boot VL53L0X"));
-    while(1);
+  initialization();
+  read_samd21_serial_no(&serialNumber);
+  printSerialNum(serialNumber);
+  for(int i = 0; i < 2; i++) {
+    if(checkSerialNum(serialNumber, conf[i].sN)){
+      board = i;
+    }
   }
-  // power 
-  Serial.println(F("VL53L0X API Simple Ranging example\n\n")); 
+
+  if(conf[board].type == TIMEOFFLIGHT) {
+  //Time of Flight Stuff 
+    Serial.println("Adafruit VL53L0X test");
+    pinMode(TOF_SHUTDOWN, OUTPUT);
+    digitalWrite(TOF_SHUTDOWN, 0); // disables 2nd sensor
+    delay(100);
+    if (!lox0.begin(TOF_ADDRESS)) {
+      Serial.println(F("Failed to boot VL53L0X 0"));
+      while(1);
+    }
+    digitalWrite(TOF_SHUTDOWN, 1);
+    if (!lox1.begin()) {
+      Serial.println(F("Failed to boot VL53L0X 1"));
+      while(1);
+    }
+    // power 
+    Serial.println(F("VL53L0X API Simple Ranging example\n\n"));
+  }
+  else {
+    Serial.println("SHOOTER MODE:");
+  }
 
 
-  strip.begin();
+  strip.begin(); 
  
   for(i = 0; i < NUMPIXELS; i++) {
     strip.setPixelColor(i, 0x000050);      
   }
   strip.show();                     // Refresh strip
+
 }
 
 void loop() {
@@ -360,38 +451,28 @@ void loop() {
   sensorValueRaw0 = newAnalogRead(sensorPin0); // used to be analogRead(), made new function
   
   // sensorValue is angle in deg * 10 eg. max is 3599
-  // sensorValue0 = (int)((sensorValueRaw0 * 1.0) / 4096.0 * 3600.0);
-  sensorValue0 = map(sensorValueRaw0, 9, 4061, 0, 3599);
+  sensorValue0 = map(sensorValueRaw0, conf[board].calib[0].fromLow, conf[board].calib[0].fromHigh, 0, 3599);
   
     // read the value from the sensor:
   sensorValueRaw1 = newAnalogRead(sensorPin1); // used to be analogRead(), made new function
   
   // sensorValue is angle in deg * 10 eg. max is 3599
-  sensorValue1 = (int)((sensorValueRaw1 * 1.0) / 4096.0 * 3600.0);
+  sensorValue1 = map(sensorValueRaw1, conf[board].calib[1].fromLow, conf[board].calib[1].fromHigh, 0, 3599);
 
     // read the value from the sensor:
   sensorValueRaw2 = newAnalogRead(sensorPin2); // used to be analogRead(), made new function
   
   // sensorValue is angle in deg * 10 eg. max is 3599
-  sensorValue2 = (int)((sensorValueRaw2 * 1.0) / 4096.0 * 3600.0);
-
-  if((sensorValue0 < 30) || (sensorValue0 > 3570)) {
-    strip.setPixelColor(0, 0x005000); 
-  } else if((sensorValue0 > 30) && (sensorValue0 <= 1800)) { // needs to go clockwise
-    strip.setPixelColor(0, 0x500000);
-  } else if((sensorValue0 > 1800) && (sensorValue0 < 3570)) { // needs to go counterclockwise
-    strip.setPixelColor(0, 0x500050);  
+  sensorValue2 = map(sensorValueRaw2, conf[board].calib[1].fromLow, conf[board].calib[2].fromHigh, 0, 3599);
+  
+  setColor(0, sensorValue0);
+  setColor(3, sensorValue1);
+  if(conf[board].type == SHOOTER) {
+    setColor(2, sensorValue2);
   }
   strip.show();
   
-  // turn the ledPin on
-  /* digitalWrite(ledPin, HIGH);
-  // stop the program for <sensorValue> milliseconds:
-  delay(sensorValue);
-  // turn the ledPin off:
-  digitalWrite(ledPin, LOW);
-  // stop the program for for <sensorValue> milliseconds: */ 
-  // delay(100);
+  Serial.println();
   Serial.print("Encoder Values:\t"); 
   Serial.print(sensorValueRaw0);
   Serial.print('\t');
@@ -399,46 +480,54 @@ void loop() {
   Serial.print('\t');
   Serial.print(sensorValueRaw1);
   Serial.print('\t');
-  Serial.print(sensorValue1);
-  Serial.print('\t');
-  Serial.print(sensorValueRaw2);
-  Serial.print('\t');
-  Serial.print(sensorValue2);
-  Serial.print('\t');
-  // Serial.print(sensorValue2);
-  // Serial.print('\t');
-  // Serial.print((1.0*sensorValue/sensorValue2)*360);
+  Serial.print(sensorValue1 / 10.0);
+  if(conf[board].type == SHOOTER) {
+    Serial.print('\t');
+    Serial.print(sensorValueRaw2);
+    Serial.print('\t');
+    Serial.print(sensorValue2 / 10.0);
+  }
   Serial.println();
 
+  if(conf[board].type == TIMEOFFLIGHT) {
+    // Time of Flight Stuff
+    VL53L0X_RangingMeasurementData_t measure;
+    
+    Serial.print("Reading a measurement (sensor 0)... ");
+    lox0.rangingTest(&measure, false); // pass in 'true' to get debug data printout!
 
-  // Time of Flight Stuff
-  VL53L0X_RangingMeasurementData_t measure;
-  /*  
-  Serial.print("Reading a measurement... ");
-  lox.rangingTest(&measure, false); // pass in 'true' to get debug data printout!
+    if (measure.RangeStatus != 4) {  // phase failures have incorrect data
+      tofDistance[0] = measure.RangeMilliMeter;
+      Serial.print("Distance (mm): ");
+      Serial.println(measure.RangeMilliMeter);
+    } else {
+      tofDistance[0] = OUT_OF_RANGE;
+      Serial.println(" out of range ");
+    }
 
-  if (measure.RangeStatus != 4) {  // phase failures have incorrect data
-    tof_distance_0 = measure.RangeMilliMeter;
-    Serial.print("Distance (mm): ");
-    Serial.println(measure.RangeMilliMeter);
-  } else {
-    tof_distance_0 = OUT_OF_RANGE;
-    Serial.println(" out of range ");
+    Serial.print("Reading a measurement (sensor 1)... ");
+    lox1.rangingTest(&measure, false); // pass in 'true' to get debug data printout!
+
+    if (measure.RangeStatus != 4) {  // phase failures have incorrect data
+      tofDistance[1] = measure.RangeMilliMeter;
+      Serial.print("Distance (mm): ");
+      Serial.println(measure.RangeMilliMeter);
+    } else {
+      tofDistance[1] = OUT_OF_RANGE;
+      Serial.println(" out of range ");
+    }
   }
-*/
   // pack message for protocol from Feather CAN Line Follower to RoboRio
-  if (tof_mode)
-  {
+  if(conf[board].type == TIMEOFFLIGHT) {
     packMsgTOF();
   }
-  else
-  {
+  else {
     packMsgShooter();
   }
     
   // send Extended msg
-  // byte sndStat = CAN0.sendMsgBuf(CAN_ID | 0x80000000, 1, 8, data);
-  // byte sndStat = CAN0.sendMsgBuf(CAN_ID, 1, 8, data);
+  // byte sndStat = CAN0.sendMsgBuf(conf[board].canId | 0x80000000, 1, 8, data);
+  // byte sndStat = CAN0.sendMsgBuf(conf[board].canId, 1, 8, data); // ITS THIS ONE!! :)
 
   /*
   for(i = 4; i < 6; i++) {
@@ -464,5 +553,5 @@ void loop() {
   */
   // Serial.println();
     
-  delay(100);
+  delay(1000);
 }
