@@ -458,18 +458,33 @@ void loop() {
   
   // sensorValue is angle in deg * 10 eg. max is 3599
   sensorValue0 = map(sensorValueRaw0, conf[board].calib[0].fromLow, conf[board].calib[0].fromHigh, 0, 3599);
-  
+  if(sensorValue0 <= -3600) {
+    sensorValue += 3600;
+  } else if(sensorValue0 >= 3600) {
+    sensorValue -= 3600;
+  }
+
     // read the value from the sensor:
   sensorValueRaw1 = newAnalogRead(sensorPin1); // used to be analogRead(), made new function
   
   // sensorValue is angle in deg * 10 eg. max is 3599
   sensorValue1 = map(sensorValueRaw1, conf[board].calib[1].fromLow, conf[board].calib[1].fromHigh, 0, 3599);
-
+  if(sensorValue1 <= -3600) {
+    sensorValue += 3600;
+  } else if(sensorValue1 >= 3600) {
+    sensorValue -= 3600;
+  }
+  
     // read the value from the sensor:
   sensorValueRaw2 = newAnalogRead(sensorPin2); // used to be analogRead(), made new function
   
   // sensorValue is angle in deg * 10 eg. max is 3599
   sensorValue2 = map(sensorValueRaw2, conf[board].calib[1].fromLow, conf[board].calib[2].fromHigh, 0, 3599);
+  if(sensorValue0 <= -3600) {
+    sensorValue += 3600;
+  } else if(sensorValue0 >= 3600) {
+    sensorValue -= 3600;
+  }
   
   setColor(0, sensorValue0);
   setColor(3, sensorValue1);
