@@ -1,6 +1,8 @@
 
 #include "config.h"
 
+#define NUM_OF_CONFIG 2
+
 struct configuration conf[2];
 
 void initialization() {
@@ -12,10 +14,13 @@ void initialization() {
   conf[0].sN.sN[3] = 0xFF0E2814;
   conf[0].calib[0].fromLow = 9;
   conf[0].calib[0].fromHigh = 4079;
+  conf[0].calib[0].offsetAngle = 0;
   conf[0].calib[1].fromLow = 11;
   conf[0].calib[1].fromHigh = 4094;
+  conf[0].calib[1].offsetAngle = 0;
   conf[0].calib[2].fromLow = 9;
   conf[0].calib[2].fromHigh = 4087;
+  conf[0].calib[2].offsetAngle = 0;
   conf[0].canId = 0x0a0800C1;
   conf[0].type = TIMEOFFLIGHT;
 
@@ -27,10 +32,13 @@ void initialization() {
   conf[1].sN.sN[3] = 0xFF0D1A30;
   conf[1].calib[0].fromLow = 10;
   conf[1].calib[0].fromHigh = 4095;
+  conf[1].calib[0].offsetAngle = 0;
   conf[1].calib[1].fromLow = 11;
   conf[1].calib[1].fromHigh = 4091;
+  conf[1].calib[1].offsetAngle = 0;
   conf[1].calib[2].fromLow = 11;
   conf[1].calib[2].fromHigh = 4094;
+  conf[1].calib[2].offsetAngle = 0;
   conf[1].canId = 0x0a080081;
   conf[1].type = SHOOTER;
 }

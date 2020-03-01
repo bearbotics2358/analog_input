@@ -407,7 +407,7 @@ void setup() {
   initialization();
   read_samd21_serial_no(&serialNumber);
   printSerialNum(serialNumber);
-  for(int i = 0; i < 2; i++) {
+  for(int i = 0; i < NUM_OF_CONFIG; i++) {
     if(checkSerialNum(serialNumber, conf[i].sN)){
       board = i;
     }
@@ -458,10 +458,11 @@ void loop() {
   
   // sensorValue is angle in deg * 10 eg. max is 3599
   sensorValue0 = map(sensorValueRaw0, conf[board].calib[0].fromLow, conf[board].calib[0].fromHigh, 0, 3599);
-  if(sensorValue0 <= -3600) {
-    sensorValue += 3600;
+  sensorValue0 -= conf[board].calib[0].offsetAngle;
+  if(sensorValue0 < 0) {
+    sensorValue0 += 3600;
   } else if(sensorValue0 >= 3600) {
-    sensorValue -= 3600;
+    sensorValue0 -= 3600;
   }
 
     // read the value from the sensor:
@@ -469,10 +470,11 @@ void loop() {
   
   // sensorValue is angle in deg * 10 eg. max is 3599
   sensorValue1 = map(sensorValueRaw1, conf[board].calib[1].fromLow, conf[board].calib[1].fromHigh, 0, 3599);
-  if(sensorValue1 <= -3600) {
-    sensorValue += 3600;
+  sensorValue1 -= conf[board].calib[1].offsetAngle;
+  if(sensorValue1 < 0) {
+    sensorValue1 += 3600;
   } else if(sensorValue1 >= 3600) {
-    sensorValue -= 3600;
+    sensorValue1 -= 3600;
   }
   
     // read the value from the sensor:
@@ -480,10 +482,11 @@ void loop() {
   
   // sensorValue is angle in deg * 10 eg. max is 3599
   sensorValue2 = map(sensorValueRaw2, conf[board].calib[1].fromLow, conf[board].calib[2].fromHigh, 0, 3599);
-  if(sensorValue0 <= -3600) {
-    sensorValue += 3600;
-  } else if(sensorValue0 >= 3600) {
-    sensorValue -= 3600;
+  sensorValue2 -= conf[board].calib[2].offsetAngle;
+  if(sensorValue2 < 0) {
+    sensorValue2 += 3600;
+  } else if(sensorValue2 >= 3600) {
+    sensorValue2 -= 3600;
   }
   
   setColor(0, sensorValue0);

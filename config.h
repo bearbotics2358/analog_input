@@ -5,6 +5,7 @@ struct serialNum {
 struct calibration {
   int fromLow;
   int fromHigh;
+  int offsetAngle; // angle in tenths of degree
 } ;
 
 enum boardType {
