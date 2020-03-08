@@ -1,4 +1,3 @@
-
 /*
   Analog Input (for shooter side)
 
@@ -34,6 +33,11 @@
 #include "Adafruit_VL53L0X.h"
 #include <Adafruit_DotStar.h>
 #include "initialization.h"
+
+// Controlling defines
+#define CAN_ENABLED 0
+#define PRINT_VALUES 0
+
 
 // CAN0 RESET, INT
 #define CAN0_RST 31   // MCP25625 RESET connected to Arduino pin 31
@@ -109,7 +113,9 @@ int sensorValue2 = 0;
 int sensorValueRaw2 = 0;
 
 // TOF sensor distance
-int tofDistance[2] = {0, 0};
+int tofDistance[2] = {OUT_OF_RANGE, OUT_OF_RANGE};
+// set if the TOF sensor is discovered
+int tofExists[2] = {0, 0};
 
 //Time of Flight Stuff
 Adafruit_VL53L0X lox0 = Adafruit_VL53L0X();
@@ -296,15 +302,15 @@ void enableAnalog() {
 }
 
 void setColor(int index, int sensorVal) {
-  if((sensorVal < 30) || (sensorVal > 3570)) { // 0xGGRRBB (color values)
+  if((sensorVal < 20) || (sensorVal > 3580)) { // 0xGGRRBB (color values)
     // Serial.print("green; we gucci fam");
     strip.setPixelColor(index, 0x500000); 
-  } else if((sensorVal > 30) && (sensorVal <= 1800)) { 
+  } else if((sensorVal > 20) && (sensorVal <= 1800)) { 
     // Serial.print("red; too far");
     strip.setPixelColor(index, 0x005000);
-  } else if((sensorVal > 1800) && (sensorVal < 3570)) {
-    // Serial.print("purple; too far");
-    strip.setPixelColor(index, 0x005050);  
+  } else if((sensorVal > 1800) && (sensorVal < 3580)) {
+    // Serial.print("yellow; too far");
+    strip.setPixelColor(index, 0x505000);  
   } else {
     // Serial.print("white; there's an error");
     strip.setPixelColor(index, 0x505050);
@@ -329,19 +335,19 @@ void read_samd21_serial_no(struct serialNum *number)
 }
 
 void printSerialNum(struct serialNum number) {
-  // Serial.print("number(0): 0x"); Serial.println(number.sN[0], HEX);
-  // Serial.print("number(1): 0x"); Serial.println(number.sN[1], HEX);
-  // Serial.print("number(2): 0x"); Serial.println(number.sN[2], HEX);
-  // Serial.print("number(3): 0x"); Serial.println(number.sN[3], HEX);
+  Serial.print("number(0): 0x"); Serial.println(number.sN[0], HEX);
+  Serial.print("number(1): 0x"); Serial.println(number.sN[1], HEX);
+  Serial.print("number(2): 0x"); Serial.println(number.sN[2], HEX);
+  Serial.print("number(3): 0x"); Serial.println(number.sN[3], HEX);
 }
 
 int checkSerialNum(struct serialNum a, struct serialNum b) {
   int ret = 0;
 
   // Serial.println("a: ");
-  printSerialNum(a);
+  // printSerialNum(a);
   // Serial.println("b: ");
-  printSerialNum(b);
+  // printSerialNum(b);
 
   if((a.sN[0] == b.sN[0]) && 
      (a.sN[1] == b.sN[1]) &&
@@ -362,7 +368,7 @@ void setup() {
 //  File file = fatfs.open (, FILE_READ);
 
   // wait for serial port connection
-  while(!Serial);
+  // while(!Serial);
 
   // declare the ledPin as an OUTPUT:
   pinMode(ledPin, OUTPUT);
@@ -375,7 +381,7 @@ void setup() {
 
   digitalWrite(ledPin, 1);
   
-    // CAN chip RESET line
+  // CAN chip RESET line
   pinMode(CAN0_RST, OUTPUT);
   // Configuring pin for /INT input
   pinMode(CAN0_INT, INPUT_PULLUP);
@@ -402,19 +408,43 @@ void setup() {
 
   digitalWrite(ledPin, 1);
 
+  strip.begin(); 
+  // LEDs RED at powerup, until board is discovered
+  for(i = 0; i < NUMPIXELS; i++) {
+    strip.setPixelColor(i, 0x005000);      
+  }
+  strip.show();                     // Refresh strip
+
   struct serialNum serialNumber;
 
   initialization();
-  read_samd21_serial_no(&serialNumber);
-  printSerialNum(serialNumber);
-  for(int i = 0; i < NUM_OF_CONFIG; i++) {
-    if(checkSerialNum(serialNumber, conf[i].sN)){
-      board = i;
+  do {
+    read_samd21_serial_no(&serialNumber);
+    printSerialNum(serialNumber);
+    for(int i = 0; i < NUM_OF_CONFIG; i++) {
+      if(checkSerialNum(serialNumber, conf[i].sN)){
+        board = i;
+      }
     }
-  }
+    if(board < 0) {
+      // board not found
+      // blink leds
+      for(i = 0; i < NUMPIXELS; i++) {
+        strip.setPixelColor(i, 0x000000);      
+      }
+      strip.show();
+      delay(500);
 
+      for(i = 0; i < NUMPIXELS; i++) {
+        strip.setPixelColor(i, 0x005000);      
+      }
+      strip.show();
+      delay(500);
+    }
+  } while(board < 0);
+  
   if(conf[board].type == TIMEOFFLIGHT) {
-  //Time of Flight Stuff 
+    //Time of Flight Stuff 
     Serial.print("TIME OF FLIGHT MODE:");
     Serial.println("Adafruit VL53L0X test");
     pinMode(TOF_SHUTDOWN, OUTPUT);
@@ -422,12 +452,14 @@ void setup() {
     delay(100);
     if (!lox0.begin(TOF_ADDRESS)) {
       Serial.println(F("Failed to boot VL53L0X 0"));
-      while(1);
+    } else {
+      tofExists[0] = 1;
     }
     digitalWrite(TOF_SHUTDOWN, 1);
     if (!lox1.begin()) {
       Serial.println(F("Failed to boot VL53L0X 1"));
-      while(1);
+    } else {
+      tofExists[0] = 1;
     }
     // power 
     Serial.println(F("VL53L0X API Simple Ranging example\n\n"));
@@ -436,14 +468,20 @@ void setup() {
     Serial.println("SHOOTER MODE:");
   }
 
-
-  strip.begin(); 
- 
+  // initialize LEDs to blue
   for(i = 0; i < NUMPIXELS; i++) {
     strip.setPixelColor(i, 0x000050);      
   }
+  
+  // set LED corresonding to board number to green
+  strip.setPixelColor(board, 0x500000);
   strip.show();                     // Refresh strip
+  delay(1000);
 
+  // initialize LEDs to blue
+  for(i = 0; i < NUMPIXELS; i++) {
+    strip.setPixelColor(i, 0x000050);      
+  }
 }
 
 void loop() {
@@ -452,7 +490,7 @@ void loop() {
     return;
   }
   t_prev = millis();
-  do {
+
   // read the value from the sensor:
   sensorValueRaw0 = newAnalogRead(sensorPin0); // used to be analogRead(), made new function
   
@@ -465,7 +503,7 @@ void loop() {
     sensorValue0 -= 3600;
   }
 
-    // read the value from the sensor:
+  // read the value from the sensor:
   sensorValueRaw1 = newAnalogRead(sensorPin1); // used to be analogRead(), made new function
   
   // sensorValue is angle in deg * 10 eg. max is 3599
@@ -477,7 +515,7 @@ void loop() {
     sensorValue1 -= 3600;
   }
   
-    // read the value from the sensor:
+  // read the value from the sensor:
   sensorValueRaw2 = newAnalogRead(sensorPin2); // used to be analogRead(), made new function
   
   // sensorValue is angle in deg * 10 eg. max is 3599
@@ -495,7 +533,8 @@ void loop() {
     setColor(2, sensorValue2);
   }
   strip.show();
-  /*
+
+#if PRINT_VALUES
   Serial.println();
   Serial.print("Encoder Values:\t"); 
   Serial.print(sensorValueRaw0);
@@ -512,36 +551,42 @@ void loop() {
     Serial.print(sensorValue2 / 10.0);
   }
   Serial.println();
-*/
+#endif
+
   if(conf[board].type == TIMEOFFLIGHT) {
     // Time of Flight Stuff
     VL53L0X_RangingMeasurementData_t measure;
     
-    // Serial.print("Reading a measurement (sensor 0)... ");
-    lox0.rangingTest(&measure, false); // pass in 'true' to get debug data printout!
+    if(tofExists[0]) {
+      // Serial.print("Reading a measurement (sensor 0)... ");
+      lox0.rangingTest(&measure, false); // pass in 'true' to get debug data printout!
 
-    if (measure.RangeStatus != 4) {  // phase failures have incorrect data
-      tofDistance[0] = measure.RangeMilliMeter;
-      // Serial.print("Distance (mm): ");
-      // Serial.println(measure.RangeMilliMeter);
-    } else {
-      tofDistance[0] = OUT_OF_RANGE;
-      // Serial.println(" out of range ");
+      if (measure.RangeStatus != 4) {  // phase failures have incorrect data
+        tofDistance[0] = measure.RangeMilliMeter;
+        // Serial.print("Distance (mm): ");
+        // Serial.println(measure.RangeMilliMeter);
+      } else {
+        tofDistance[0] = OUT_OF_RANGE;
+        // Serial.println(" out of range ");
+      }
     }
+    
+    if(tofExists[1]) {
+      // Serial.print("Reading a measurement (sensor 1)... ");
+      lox1.rangingTest(&measure, false); // pass in 'true' to get debug data printout!
 
-    // Serial.print("Reading a measurement (sensor 1)... ");
-    lox1.rangingTest(&measure, false); // pass in 'true' to get debug data printout!
-
-    if (measure.RangeStatus != 4) {  // phase failures have incorrect data
-      tofDistance[1] = measure.RangeMilliMeter;
-      // Serial.print("Distance (mm): ");
-      // Serial.println(measure.RangeMilliMeter);
-    } else {
-      tofDistance[1] = OUT_OF_RANGE;
-      // Serial.println(" out of range ");
+      if (measure.RangeStatus != 4) {  // phase failures have incorrect data
+        tofDistance[1] = measure.RangeMilliMeter;
+        // Serial.print("Distance (mm): ");
+        // Serial.println(measure.RangeMilliMeter);
+      } else {
+        tofDistance[1] = OUT_OF_RANGE;
+        // Serial.println(" out of range ");
+      }
     }
   }
-  // pack message for protocol from Feather CAN Line Follower to RoboRio
+  
+  // pack message for protocol from Feather CAN to RoboRio
   if(conf[board].type == TIMEOFFLIGHT) {
     packMsgTOF();
   }
@@ -549,6 +594,7 @@ void loop() {
     packMsgShooter();
   }
     
+#if CAN_ENABLED
   // send Extended msg
   // byte sndStat = CAN0.sendMsgBuf(conf[board].canId | 0x80000000, 1, 8, data);
   byte sndStat = CAN0.sendMsgBuf(conf[board].canId, 1, 8, data); // ITS THIS ONE!! :)
@@ -576,7 +622,7 @@ void loop() {
   }
   */
   // Serial.println();
+#endif
     
   // delay(1000);
-  }
 }
